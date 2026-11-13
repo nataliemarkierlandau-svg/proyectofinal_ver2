@@ -43,8 +43,10 @@ class _PersonasScreenState extends State<PersonasScreen> {
           .get();
 
       List<Persona> listaTemporal = [];
+
       for (var doc in snapshot.docs) {
         String nombre = doc['nombre'] ?? '';
+        String telefono = doc['telefono'] ?? '';
         String fotoDefecto = "https://ui-avatars.com/api/?name=${Uri.encodeComponent(nombre)}&background=3B6E8C&color=fff&size=128";
 
         final datos = doc.data() as Map<String, dynamic>;
@@ -53,13 +55,15 @@ class _PersonasScreenState extends State<PersonasScreen> {
             : fotoDefecto;
 
         listaTemporal.add(
-          Persona(doc.id, nombre, doc['telefono'] ?? '', urlFinal),
+          Persona(doc.id, nombre, telefono, urlFinal),
         );
       }
 
-      setState(() {
-        personas = listaTemporal;
-      });
+      if (mounted) {
+        setState(() {
+          personas = listaTemporal;
+        });
+      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -77,7 +81,7 @@ class _PersonasScreenState extends State<PersonasScreen> {
 
     showDialog(
       context: context,
-      builder: (context) {
+      builder: (dialogContext) {
         return StatefulBuilder( 
           builder: (context, setDialogState) {
             return AlertDialog(
@@ -103,7 +107,7 @@ class _PersonasScreenState extends State<PersonasScreen> {
                       },
                       child: CircleAvatar(
                         radius: 45,
-                        backgroundColor: const Color(0xFF3B6E8C).withOpacity(0.2),
+                        backgroundColor: const Color(0xFF3B6E8C).withValues(alpha: 0.2),
                         backgroundImage: webImageBytes != null
                             ? MemoryImage(webImageBytes!)
                             : null,
@@ -114,7 +118,7 @@ class _PersonasScreenState extends State<PersonasScreen> {
                     ),
                     const SizedBox(height: 8),
                     const Text(
-                      "Toca para elegir foto de tu PC",
+                      "Toca para elegir foto de tu PC/Teléfono",
                       style: TextStyle(fontSize: 12, color: Colors.black54),
                     ),
                     const SizedBox(height: 20),
@@ -151,7 +155,7 @@ class _PersonasScreenState extends State<PersonasScreen> {
               ),
               actions: [
                 TextButton(
-                  onPressed: () => Navigator.pop(context),
+                  onPressed: () => Navigator.pop(dialogContext),
                   child: const Text("Cancelar", style: TextStyle(color: Colors.grey)),
                 ),
                 ElevatedButton(
@@ -169,28 +173,45 @@ class _PersonasScreenState extends State<PersonasScreen> {
                         String nombre = nombreController.text.trim();
                         String telefono = telefonoController.text.trim();
                         
+                        // ID numérico limpio para la colección de dispositivos
+                        String telefonoId = telefono.replaceAll(RegExp(r'\D'), '');
+
                         String fotoAGuardar = "https://ui-avatars.com/api/?name=${Uri.encodeComponent(nombre)}&background=3B6E8C&color=fff&size=128";
 
+                        // 1. Guardar persona en 'personas_asignadas'
                         DocumentReference docRef = await FirebaseFirestore.instance.collection('personas_asignadas').add({
                           'nombre': nombre,
                           'telefono': telefono,
+                          'telefono_id': telefonoId,
                           'foto_url': fotoAGuardar, 
                           'supervisor_id': supervisorUid, 
-                          'fecha_creacion': DateTime.now(),
+                          'fecha_creacion': FieldValue.serverTimestamp(),
                         });
+
+                        // 2. Alta inicial en 'dispositivos' para las nuevas personas
+                        if (telefonoId.isNotEmpty) {
+                          await FirebaseFirestore.instance.collection('dispositivos').doc(telefonoId).set({
+                            'nombre': nombre,
+                            'telefono': telefono,
+                            'lat': -34.5947, // Ubicación inicial por defecto (Colegio Aletheia)
+                            'lng': -58.4116,
+                            'creado_el': FieldValue.serverTimestamp(),
+                          }, SetOptions(merge: true));
+                        }
+
+                        if (!mounted) return;
 
                         setState(() {
                           personas.add(Persona(docRef.id, nombre, telefono, fotoAGuardar));
                         });
 
-                        if (mounted) Navigator.pop(context);
+                        Navigator.pop(dialogContext);
 
                       } catch (e) {
-                        if (mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text('Error al guardar: $e'), backgroundColor: Colors.redAccent),
-                          );
-                        }
+                        if (!mounted) return;
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text('Error al guardar: $e'), backgroundColor: Colors.redAccent),
+                        );
                       }
                     }
                   },
@@ -262,7 +283,7 @@ class _PersonasScreenState extends State<PersonasScreen> {
                           borderRadius: BorderRadius.circular(15),
                           boxShadow: [
                             BoxShadow(
-                              color: Colors.black.withOpacity(0.05),
+                              color: Colors.black.withValues(alpha: 0.05),
                               blurRadius: 5,
                               offset: const Offset(0, 2),
                             ),
@@ -308,7 +329,6 @@ class _PersonasScreenState extends State<PersonasScreen> {
                             },
                           ),
                           onTap: () {
-                            // Al tocar la tarjeta, va directamente al mapa sin disparar ningún mensaje
                             Navigator.push(
                               context, 
                               MaterialPageRoute(builder: (context) => Mapa(persona: persona)),
